@@ -1,0 +1,233 @@
+import pandas as pd
+
+sample_csv = pd.read_csv('sample_sheet.csv', index_col='name')
+REPS = set(sample_csv['replicate'].tolist())
+READS = set(sample_csv['read'].tolist())
+
+rule all:
+    input:
+        expand('results/{rep}_flagstats.txt', rep = REPS),
+
+
+rule bowtie2_build_gencode: 
+    input:
+        reference='results/GRCh38.primary_assembly.genome.fa.gz'
+    output:
+        expand('results/GRCh38_index.{ext}', ext=['1.bt2', '2.bt2', '3.bt2', '4.bt2', 'rev.1.bt2', 'rev.2.bt2'])
+    params:
+        basename="results/GRCh38_index"
+    threads: 16
+    conda:
+        'envs/bowtie2_env.yml'
+    shell:
+        """
+        bowtie2-build --threads {threads} {input.reference} {params.basename}
+        """
+
+rule fastqc:
+    input:
+        fastq='samples/{rep}_{read}.fastq.gz'
+    output:
+        fastqc='results/{rep}_{read}_fastqc.html'
+    params:
+        outdir='results/'
+    threads: 16
+    conda:
+        'envs/fastqc_env.yml'
+    shell:
+        '''
+        fastqc --threads {threads} {input.fastq} -o {params.outdir} 
+        '''
+
+rule trimmomatic:
+    input:
+        fastq1 = 'samples/{rep}_R1.fastq.gz',
+        fastq2 = 'samples/{rep}_R2.fastq.gz',
+        adapters = 'results/NexteraPE-PE.fa'
+    output:
+        unpaired1 = 'results/{rep}_R1.unpaired.trimmed.fastq.gz',
+        unpaired2 = 'results/{rep}_R2.unpaired.trimmed.fastq.gz',
+        paired1 = 'results/{rep}_R1.paired.trimmed.fastq.gz',
+        paired2 = 'results/{rep}_R2.paired.trimmed.fastq.gz'
+    threads: 8
+    conda:
+        'envs/trimmomatic_env.yml'
+    shell:
+        '''
+        trimmomatic PE -threads {threads} {input.fastq1} {input.fastq2} {output.paired1} {output.unpaired1} {output.paired2} {output.unpaired2} ILLUMINACLIP:{input.adapters}:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15
+        '''
+rule bowtie2_align:
+    input: 
+        fastq1='results/{rep}_R1.paired.trimmed.fastq.gz',
+        fastq2='results/{rep}_R2.paired.trimmed.fastq.gz',
+        index_files=expand('results/GRCh38_index.{ext}', ext=['1.bt2', '2.bt2', '3.bt2', '4.bt2', 'rev.1.bt2', 'rev.2.bt2'])
+    output:
+        bam_file='results/{rep}.bam'
+    threads: 32
+    params:
+        index_basename='results/GRCh38_index'
+    conda:
+        'envs/bowtie2_env.yml'
+    shell:
+        '''
+        bowtie2 --threads {threads} --local --very-sensitive --no-mixed --no-discordant -I 25 -X 2000 -x {params.index_basename} -1 {input.fastq1} -2 {input.fastq2} | samtools view -bS - > {output.bam_file}
+        '''
+rule samtools_sort:
+	input:
+		bam_file = 'results/{rep}.bam'
+	output:
+		sorted_bam = 'results/{rep}_sorted.bam'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		'''
+		samtools sort {input.bam_file} -o {output.sorted_bam}
+		'''
+rule filter_mito_genes: 
+    input: 
+        sorted_bam = 'results/{rep}_sorted.bam'
+    output:
+        filtered_bam_file = 'results/{rep}_.rmChrM.bam'
+    threads: 16
+    conda:
+        'envs/samtools_env.yml'
+    shell:
+        '''
+        samtools view -h {input.sorted_bam} | grep -v chrM | samtools sort -O bam -o {output.filtered_bam_file} 
+        '''
+rule samtools_idx:
+	input:
+		sorted_bam = 'results/{rep}.rmChrM.bam'
+	output:
+		index_bam = 'results/{rep}.rmChrM.bam.bai'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		'''
+		samtools index {input.sorted_bam}
+		'''
+rule samtools_flagstats:
+    input:
+        sorted_bam = 'results/{rep}.rmChrM.bam',
+        index_bam = 'results/{rep}.rmChrM.bam.bai'
+    output:
+        flagstats = 'results/{rep}_flagstats.txt'
+    conda:
+        'envs/samtools_env.yml'
+    shell:
+        '''
+        samtools flagstats {input.sorted_bam} > {output.flagstats}
+        '''
+rule samtools_idx:
+	input:
+		sorted_bam = 'results/{rep}.rmChrM.bam'
+	output:
+		index_bam = 'results/{rep}.rmChrM.bam.bai'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		'''
+		samtools index {input.sorted_bam}
+		'''
+rule samtools_flagstats:
+    input:
+        sorted_bam = 'results/{rep}.rmChrM.bam',
+        index_bam = 'results/{rep}.rmChrM.bam.bai'
+    output:
+        flagstats = 'results/{rep}_flagstats.txt'
+    conda:
+        'envs/samtools_env.yml'
+    shell:
+        '''
+        samtools flagstats {input.sorted_bam} > {output.flagstats}
+        '''
+rule multiqc:
+	input:
+		flagstats = expand('results/{rep}_flagstats.txt', rep = REPS)
+	output:
+		qc_report = 'results/multiqc_report.html'
+	params:
+		outdir = 'results/'
+	conda:
+		'envs/multiqc_env.yml'
+	shell:
+		'''
+		multiqc {params.outdir} -o {params.outdir}
+		'''
+rule bamCoverage:
+	input:
+		sorted_bam = 'results/{rep}.rmChrM.bam'
+        index_bam = 'results/{rep}.rmChrM.bam.bai'
+	output:
+		sorted_bigwig = 'results/{rep}.bigWig'
+	threads: 4
+	conda:
+		'envs/deeptools_env.yml'
+	shell:
+		'''
+		bamCoverage -b {input.sorted_bam} -o {output.sorted_bigwig}
+		'''
+rule filter_blacklist:
+    input:
+        blacklist='samples/hg38-blacklist.v2.bed',
+        sorted_bam='results/{rep}.rmChrM.bam'
+    output:
+        filtered_bam='results/{rep}_filtered.bam'
+    conda:
+        'envs/bedtools_env.yml'
+    shell:
+        '''
+        bedtools intersect -nonamecheck -v -abam {input.sorted_bam} -b {input.blacklist} > {output.filtered_bam}
+        '''
+
+rule sort_filtered_bam:
+    input:
+        filtered_bam='results/{rep}_filtered.bam'
+    output:
+        filtered_bam_index='results/{rep}_sort_filtered.bam'
+    conda:
+        'envs/samtools_env.yml'
+    shell:
+        '''
+        samtools sort {input.filtered_bam} -o {output.filtered_bam_index}
+        '''
+
+rule index_filtered_bam:
+    input:
+        filtered_bam='results/{rep}_sort_filtered.bam'
+    output:
+        filtered_bam_index='results/{rep}_sort_filtered.bam.bai'
+    conda:
+        'envs/samtools_env.yml'
+    shell:
+        '''
+        samtools index {input.filtered_bam}
+        '''
+
+rule shift_bam:
+    input:
+        filtered_bam_index='results/{rep}_sort_filtered.bam.bai',
+        blacklist='samples/hg38-blacklist.v2.bed'
+    output:
+        shift='results/{rep}_shifted.bam'
+    conda:
+        'envs/deeptools_env.yml'
+    shell:
+        '''
+        alignmentSieve --numberOfProcessors max --ATACshift --blackListFileName {input.blacklist} --bam {input.filtered_bam_index} -o {output.shift}
+        '''
+
+rule index_shift:
+    input:
+        shift='results/{rep}_shifted.bam'
+    output:
+        shift_index='results/{rep}_shifted.bam.bai'
+    conda:
+        'envs/samtools_env.yml'
+    shell:
+        '''
+        samtools index {input.shift}
+        '''
+
+
+
