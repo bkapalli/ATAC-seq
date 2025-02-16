@@ -1,15 +1,3 @@
----
-title: "ATAC-seq report"
-author: "Shreya Nalluri"
-date: "2024-05-06"
-output:
-  html_document: default
-  pdf_document: default
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
 # Methods 
 
 Overall methods were adapted from [The Cebola lab's ATAC-seq pipeline](https://github.com/CebolaLab/ATAC-seq){target="_blank"} as well as the publication, [*From reads to insight: a hitchhiker’s guide to ATAC-seq data analysis*](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-1929-3){target="_blank"}.
