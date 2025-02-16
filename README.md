@@ -11,6 +11,9 @@ The filtered peaks were annotated to their nearest genomic feature using HOMER v
 
 The score matrix for each replicate was computed using deeptools v3.5.4 computeMatrix and with reference genomic coordinates for the entire genome extracted from the UCSC Table Browser (selections: Clade: Mammal, Genome: Human, assembly: hg38, group: Genes and Gene Predictions, track: NCBI RefSeq, table: UCSC Refseq, region: genome). This score matrix was used to plot signal coverage for each replicate with deeptools v3.5.4 plotProfile, with default parameters.
 
+- `ATACseq_final.snake` → Full snakemake workflow
+- `ATACseqQC.R` → Quality control
+
 ## Questions to Address
 
 1. Are there any concerning aspects of the quality control of your sequencing reads?
